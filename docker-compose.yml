@@ -1,0 +1,169 @@
+# AgentForge 本地基础设施编排：MySQL / Redis / MinIO / Qdrant
+#
+# 用法（在仓库根目录执行）：
+#   cp .env.example .env     # 首次：生成实际配置，按需修改密钥
+#   make up                  # 等价于 docker compose up -d
+#   make urls                # 查看各服务访问地址
+#
+# 约定：
+#   1. 本文件放在仓库根目录，docker compose 会自动读取根目录的 .env 做变量插值，
+#      因此不需要为每个服务写 env_file（也避免把 LLM_API_KEY 之类的密钥灌进数据库容器）。
+#   2. 每个变量都带默认值，所以 .env 不存在时也能启动（仅限本地开发场景）。
+#   3. 宿主机端口一律写成 "${X_PORT:-默认值}"，被本机已有服务占用时可在 .env 里覆盖，
+#      例如本机 Homebrew mysqld 已占用 3306，则设置 MYSQL_PORT=3307。
+#   4. 容器状态数据放命名卷（mysql-data / redis-data / minio-data / qdrant-data），
+#      不用 ./data 目录：data/ 是 Agent 的 RAG 原始语料（data/blog、data/repo）。
+#   5. 镜像 tag：mysql / redis 固定到具体版本；minio / qdrant 因官方只维护 latest 与日期型
+#      tag，首次 pull 成功后建议改为具体 tag（见 README「已知注意事项」）。
+name: agentforge
+
+services:
+  # ---------------------------------------------------------------- MySQL
+  mysql:
+    image: mysql:8.4
+    container_name: agentforge-mysql
+    restart: unless-stopped
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+      - --default-time-zone=+08:00
+      - --max-connections=500
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-root123}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-agentforge}
+      TZ: ${TZ:-Asia/Shanghai}
+    ports:
+      - "${MYSQL_PORT:-3306}:3306"
+    volumes:
+      - mysql-data:/var/lib/mysql
+      - ./infra/mysql/init.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -p\"$$MYSQL_ROOT_PASSWORD\" --silent"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 40s
+    networks:
+      - agentforge
+
+  # ---------------------------------------------------------------- Redis
+  redis:
+    image: redis:7.4-alpine
+    container_name: agentforge-redis
+    restart: unless-stopped
+    environment:
+      # 留空 = 不启用密码（.env.example 默认即空）
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-}
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redis-data:/data
+    # 有密码就带 --requirepass，没有就裸起；用 sh -c 在容器内判断，避免 compose 侧写两套配置
+    command:
+      - sh
+      - -c
+      - |
+        if [ -n "$$REDIS_PASSWORD" ]; then
+          exec redis-server --appendonly yes --requirepass "$$REDIS_PASSWORD"
+        fi
+        exec redis-server --appendonly yes
+    healthcheck:
+      test: >
+        if [ -n "$$REDIS_PASSWORD" ]; then redis-cli --no-auth-warning -a "$$REDIS_PASSWORD" ping; else redis-cli ping; fi | grep -q PONG
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    networks:
+      - agentforge
+
+  # ---------------------------------------------------------------- MinIO
+  minio:
+    image: minio/minio:latest
+    container_name: agentforge-minio
+    restart: unless-stopped
+    command: ["server", "/data", "--console-address", ":9001"]
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
+      MINIO_BROWSER_REDIRECT_URL: http://localhost:${MINIO_CONSOLE_PORT:-9001}
+    ports:
+      - "${MINIO_API_PORT:-9000}:9000"
+      - "${MINIO_CONSOLE_PORT:-9001}:9001"
+    volumes:
+      - minio-data:/data
+    healthcheck:
+      # 不同 minio 镜像里可用的探针工具不一样（新镜像常带 mc，旧的带 curl），
+      # 两者都试一遍，任一成功即视为健康。注意没有其他服务依赖该健康状态。
+      test: ["CMD-SHELL", "mc ready local >/dev/null 2>&1 || curl -fsS http://127.0.0.1:9000/minio/health/live >/dev/null"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 15s
+    networks:
+      - agentforge
+
+  # 一次性任务：等 MinIO 就绪后创建默认 bucket，建完即退出
+  minio-init:
+    image: minio/mc:latest
+    container_name: agentforge-minio-init
+    depends_on:
+      minio:
+        # 用 service_started（而非 service_healthy）+ 脚本内重试，
+        # 这样即使上面 healthcheck 的探针工具在该镜像里缺失，初始化也不会被卡死
+        condition: service_started
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
+      MINIO_BUCKET: ${MINIO_BUCKET:-agentforge}
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        set -e
+        until mc alias set local http://minio:9000 "$$MINIO_ROOT_USER" "$$MINIO_ROOT_PASSWORD" >/dev/null 2>&1; do
+          echo "waiting for minio to be ready ..."
+          sleep 2
+        done
+        mc mb --ignore-existing "local/$$MINIO_BUCKET"
+        echo "minio bucket ready: $$MINIO_BUCKET"
+    restart: "no"
+    networks:
+      - agentforge
+
+  # ---------------------------------------------------------------- Qdrant
+  qdrant:
+    image: qdrant/qdrant:latest
+    container_name: agentforge-qdrant
+    restart: unless-stopped
+    environment:
+      # .env.example 默认为空 = 本地开发不启用鉴权。
+      # 若设置 QDRANT_API_KEY，所有客户端请求都要带上该 key（见 README 故障排查）。
+      QDRANT__SERVICE__API_KEY: ${QDRANT_API_KEY:-}
+      QDRANT__TELEMETRY_DISABLED: "true"
+    ports:
+      - "${QDRANT_HTTP_PORT:-6333}:6333"
+      - "${QDRANT_GRPC_PORT:-6334}:6334"
+    volumes:
+      - qdrant-data:/storage
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c 'exec 3<>/dev/tcp/127.0.0.1/6333' || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 15s
+    networks:
+      - agentforge
+
+networks:
+  agentforge:
+    name: agentforge
+
+volumes:
+  mysql-data:
+    name: agentforge-mysql-data
+  redis-data:
+    name: agentforge-redis-data
+  minio-data:
+    name: agentforge-minio-data
+  qdrant-data:
+    name: agentforge-qdrant-data
