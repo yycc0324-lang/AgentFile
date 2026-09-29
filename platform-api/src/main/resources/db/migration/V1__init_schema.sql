@@ -63,7 +63,72 @@ CREATE TABLE IF NOT EXISTS message (
     INDEX idx_created_at (created_at)
 ) COMMENT '会话消息';
 
+-- ---------------------------------------------------------------- 任务
+-- 一次 Agent 任务；M1 可用于记录 chat / doc_qa / code_qa 等任务。
+CREATE TABLE IF NOT EXISTS task (
+                                    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+                                    project_id BIGINT NOT NULL COMMENT '所属项目',
+                                    conversation_id BIGINT COMMENT '来源会话，可为空',
+                                    parent_task_id BIGINT COMMENT '父任务，用于子任务',
+                                    task_type VARCHAR(32) NOT NULL DEFAULT 'chat' COMMENT 'chat / doc_qa / code_qa / coding',
+                                    title VARCHAR(500) COMMENT '任务标题',
+                                    input MEDIUMTEXT COMMENT '任务输入 / Issue 内容',
+                                    status VARCHAR(32) NOT NULL DEFAULT 'pending' COMMENT 'pending / running / success / failed / cancelled',
+                                    result MEDIUMTEXT COMMENT '最终结果',
+                                    error_message TEXT COMMENT '失败原因',
+                                    max_steps INT NOT NULL DEFAULT 20 COMMENT '最大执行步数',
+                                    current_step INT NOT NULL DEFAULT 0 COMMENT '当前步骤数',
+                                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                                    started_at DATETIME(3) COMMENT '开始时间（毫秒精度）',
+                                    finished_at DATETIME(3) COMMENT '结束时间（毫秒精度）',
+                                    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                                    INDEX idx_project_id (project_id),
+                                    INDEX idx_conversation_id (conversation_id),
+                                    INDEX idx_status (status),
+                                    INDEX idx_parent_task_id (parent_task_id)
+) COMMENT 'Agent 任务';
 
+
+-- ---------------------------------------------------------------- 任务步骤
+CREATE TABLE IF NOT EXISTS task_step (
+                                         id BIGINT AUTO_INCREMENT PRIMARY KEY,
+                                         task_id BIGINT NOT NULL COMMENT '所属任务',
+                                         step_index INT NOT NULL COMMENT '步骤序号，从 1 开始',
+                                         step_type VARCHAR(32) NOT NULL DEFAULT 'agent' COMMENT 'agent / llm / tool / rag / reflection',
+                                         name VARCHAR(128) NOT NULL COMMENT '步骤名，如 plan / locate / edit / test',
+                                         status VARCHAR(32) NOT NULL DEFAULT 'pending' COMMENT 'pending / running / success / failed',
+                                         input TEXT COMMENT '步骤输入',
+                                         output MEDIUMTEXT COMMENT '步骤输出',
+                                         error_message TEXT COMMENT '失败原因',
+                                         started_at DATETIME(3) COMMENT '开始时间（毫秒精度）',
+                                         ended_at DATETIME(3) COMMENT '结束时间（毫秒精度）',
+                                         duration_ms INT COMMENT '耗时（毫秒）',
+                                         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                                         UNIQUE KEY uk_task_step (task_id, step_index),
+                                         INDEX idx_task_id (task_id),
+                                         INDEX idx_status (status)
+) COMMENT '任务步骤';
+
+
+-- ---------------------------------------------------------------- 工具调用
+CREATE TABLE IF NOT EXISTS tool_call (
+                                         id BIGINT AUTO_INCREMENT PRIMARY KEY,
+                                         task_id BIGINT COMMENT '所属任务',
+                                         step_id BIGINT COMMENT '所属步骤',
+                                         trace_id VARCHAR(64) COMMENT '关联 Trace',
+                                         tool_name VARCHAR(128) NOT NULL COMMENT '工具名，如 search_code / read_file / run_tests',
+                                         arguments JSON COMMENT '调用参数',
+                                         result MEDIUMTEXT COMMENT '工具返回结果',
+                                         status VARCHAR(32) NOT NULL DEFAULT 'success' COMMENT 'success / error / timeout',
+                                         error_message TEXT COMMENT '失败原因',
+                                         duration_ms INT COMMENT '耗时（毫秒）',
+                                         called_at DATETIME(3) NOT NULL COMMENT '调用时间（毫秒精度）',
+                                         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                                         INDEX idx_task_id (task_id),
+                                         INDEX idx_step_id (step_id),
+                                         INDEX idx_trace_id (trace_id),
+                                         INDEX idx_tool_name (tool_name)
+) COMMENT '工具调用记录';
 -- ---------------------------------------------------------------- 调用链
 -- 可观测性核心表：一次请求内的每一步（LLM 调用、工具调用、检索）都是一行 span。
 -- 同一链路共享 trace_id，通过 parent_span_id 组成树，用于回放 Agent 的执行过程。
@@ -73,6 +138,9 @@ CREATE TABLE IF NOT EXISTS trace_span (
     conversation_id BIGINT COMMENT '所属会话',
     message_id BIGINT COMMENT '对应的消息（助手回复）',
     parent_span_id BIGINT COMMENT '父 span，为空表示链路根节点',
+    task_id BIGINT COMMENT '所属任务',
+    step_id BIGINT COMMENT '所属步骤',
+    tool_call_id BIGINT COMMENT '对应工具调用',
     name VARCHAR(128) NOT NULL COMMENT 'span 名称，如 llm.chat / tool.search / rag.retrieve',
     span_type VARCHAR(32) NOT NULL DEFAULT 'internal' COMMENT 'llm / tool / retrieval / internal',
     status VARCHAR(32) NOT NULL DEFAULT 'success' COMMENT 'success / error',
@@ -87,6 +155,9 @@ CREATE TABLE IF NOT EXISTS trace_span (
     INDEX idx_trace_id (trace_id),
     INDEX idx_conversation_id (conversation_id),
     INDEX idx_message_id (message_id),
+    INDEX idx_task_id (task_id),
+    INDEX idx_step_id (step_id),
+    INDEX idx_tool_call_id (tool_call_id),
     INDEX idx_started_at (started_at)
 ) COMMENT 'Agent 执行链路 span';
 
@@ -120,6 +191,8 @@ CREATE TABLE IF NOT EXISTS chunk (
     document_id BIGINT NOT NULL COMMENT '所属文档',
     project_id BIGINT NOT NULL COMMENT '冗余的项目 ID，便于按项目直接过滤检索',
     chunk_index INT NOT NULL COMMENT '文档内序号，从 0 开始',
+    start_line INT COMMENT '切片起始行号，代码/文档引用用',
+    end_line INT COMMENT '切片结束行号，代码/文档引用用',
     content MEDIUMTEXT NOT NULL COMMENT '切片正文',
     token_count INT COMMENT '切片 token 数',
     vector_id VARCHAR(64) COMMENT 'Qdrant point id',
@@ -138,24 +211,24 @@ CREATE TABLE IF NOT EXISTS eval_dataset (
     project_id BIGINT NOT NULL COMMENT '所属项目',
     name VARCHAR(255) NOT NULL COMMENT '数据集名称',
     description TEXT COMMENT '用途说明',
-    case_count INT NOT NULL DEFAULT 0 COMMENT '题目数量（冗余计数，便于列表展示）',
+    sample_count INT NOT NULL DEFAULT 0 COMMENT '样本数量（冗余计数，便于列表展示）',
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     INDEX idx_project_id (project_id)
 ) COMMENT '评测数据集';
 
 
--- ---------------------------------------------------------------- 评测：题目
-CREATE TABLE IF NOT EXISTS eval_case (
-    id BIGINT AUTO_INCREMENT PRIMARY KEY,
-    dataset_id BIGINT NOT NULL COMMENT '所属数据集',
-    question TEXT NOT NULL COMMENT '待提问的问题',
-    expected_answer TEXT COMMENT '参考答案（用于语义相似度/LLM 打分）',
-    expected_doc_ids VARCHAR(500) COMMENT '期望命中的 document id，逗号分隔（用于召回率打分）',
-    tags VARCHAR(255) COMMENT '标签，逗号分隔',
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    INDEX idx_dataset_id (dataset_id)
-) COMMENT '评测题目';
+-- ---------------------------------------------------------------- 评测：样本
+CREATE TABLE IF NOT EXISTS eval_sample (
+                                           id BIGINT AUTO_INCREMENT PRIMARY KEY,
+                                           dataset_id BIGINT NOT NULL COMMENT '所属数据集',
+                                           question TEXT NOT NULL COMMENT '待提问的问题',
+                                           expected_answer TEXT COMMENT '参考答案（用于语义相似度/LLM 打分）',
+                                           expected_doc_ids VARCHAR(500) COMMENT '期望命中的 document id，逗号分隔（用于召回率打分）',
+                                           tags VARCHAR(255) COMMENT '标签，逗号分隔',
+                                           created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                                           INDEX idx_dataset_id (dataset_id)
+) COMMENT '评测样本';
 
 
 -- ---------------------------------------------------------------- 评测：批次
@@ -167,8 +240,8 @@ CREATE TABLE IF NOT EXISTS eval_run (
     name VARCHAR(255) COMMENT '批次名称，如 v1-baseline',
     status VARCHAR(32) NOT NULL DEFAULT 'pending' COMMENT 'pending / running / success / failed',
     metrics JSON COMMENT '汇总指标：hit_rate / faithfulness / avg_latency_ms 等',
-    case_total INT NOT NULL DEFAULT 0 COMMENT '题目总数',
-    case_passed INT NOT NULL DEFAULT 0 COMMENT '通过数',
+    sample_total INT NOT NULL DEFAULT 0 COMMENT '样本总数',
+    sample_passed INT NOT NULL DEFAULT 0 COMMENT '通过数',
     started_at DATETIME(3) COMMENT '开始时间',
     finished_at DATETIME(3) COMMENT '结束时间',
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
@@ -178,17 +251,18 @@ CREATE TABLE IF NOT EXISTS eval_run (
 
 
 -- ---------------------------------------------------------------- 评测：单题结果
-CREATE TABLE IF NOT EXISTS eval_result (
-    id BIGINT AUTO_INCREMENT PRIMARY KEY,
-    run_id BIGINT NOT NULL COMMENT '所属评测批次',
-    case_id BIGINT NOT NULL COMMENT '对应题目',
-    answer TEXT COMMENT '系统实际回答',
-    retrieved_doc_ids VARCHAR(500) COMMENT '实际召回的 document id，逗号分隔',
-    score DECIMAL(6,4) COMMENT '得分，0.0000 ~ 1.0000',
-    passed TINYINT NOT NULL DEFAULT 0 COMMENT '是否通过：0=否 1=是',
-    metrics JSON COMMENT '该题的细分指标：召回率、相似度、耗时分布等',
-    latency_ms INT COMMENT '该题耗时（毫秒）',
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    INDEX idx_run_id (run_id),
-    INDEX idx_case_id (case_id)
-) COMMENT '评测单题结果';
+-- ---------------------------------------------------------------- 评测：样本结果
+CREATE TABLE IF NOT EXISTS eval_score (
+                                          id BIGINT AUTO_INCREMENT PRIMARY KEY,
+                                          run_id BIGINT NOT NULL COMMENT '所属评测批次',
+                                          sample_id BIGINT NOT NULL COMMENT '对应样本',
+                                          answer TEXT COMMENT '系统实际回答',
+                                          retrieved_doc_ids VARCHAR(500) COMMENT '实际召回的 document id，逗号分隔',
+                                          score DECIMAL(6,4) COMMENT '得分，0.0000 ~ 1.0000',
+                                          passed TINYINT NOT NULL DEFAULT 0 COMMENT '是否通过：0=否 1=是',
+                                          metrics JSON COMMENT '该样本的细分指标：召回率、相似度、耗时分布等',
+                                          latency_ms INT COMMENT '该样本耗时（毫秒）',
+                                          created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                                          INDEX idx_run_id (run_id),
+                                          INDEX idx_sample_id (sample_id)
+) COMMENT '评测样本结果';

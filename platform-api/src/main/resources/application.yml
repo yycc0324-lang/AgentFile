@@ -25,7 +25,7 @@ spring:
     # 再配合 connectionCollation 固定排序规则与 init.sql 保持一致。
     url: jdbc:mysql://${MYSQL_HOST:127.0.0.1}:${MYSQL_PORT:3306}/${MYSQL_DATABASE:agentforge}?useUnicode=true&characterEncoding=UTF-8&connectionCollation=utf8mb4_unicode_ci&useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai&rewriteBatchedStatements=true
     username: ${MYSQL_USER:root}
-    password: ${MYSQL_ROOT_PASSWORD:root123}
+    password: ${MYSQL_ROOT_PASSWORD:123456}
     driver-class-name: com.mysql.cj.jdbc.Driver
     hikari:
       pool-name: agentforge-pool
