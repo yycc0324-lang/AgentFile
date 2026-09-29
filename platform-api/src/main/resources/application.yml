@@ -1,0 +1,82 @@
+# AgentForge platform-api 配置
+#
+# 覆盖优先级（后者覆盖前者）：本文件默认值 → 环境变量（${XXX:默认值} 形式）。
+# 说明：
+#   1. ${VAR:default} 里的 default 只在环境变量缺失时生效，因此本机开箱可用，
+#      换机器/换端口只需导出环境变量，不必改这个文件。
+#   2. 仓库根目录的 .env 是 docker compose 用的配置源（Spring Boot 不会自动读它），
+#      下面用 spring.config.import 把它按 properties 格式导入，让容器和本地应用共用一份配置。
+#      该导入是 optional 的：文件不存在也不会启动失败。
+#   3. 本机 3306 被 Homebrew 的 mysqld 占用，.env 里把容器 MySQL 映射到了 3307。
+
+spring:
+  application:
+    name: platform-api
+
+  config:
+    import:
+      - optional:file:../.env[.properties]
+      - optional:file:.env[.properties]
+
+  datasource:
+    # characterEncoding 用的是 Java 字符集名（UTF-8），不是 MySQL 的字符集名（utf8mb4）：
+    # 写成 characterEncoding=utf8mb4 会直接报 Unsupported character encoding。
+    # Connector/J 8/9 在 characterEncoding=UTF-8 时会自动按服务端的 utf8mb4 协商，
+    # 再配合 connectionCollation 固定排序规则与 init.sql 保持一致。
+    url: jdbc:mysql://${MYSQL_HOST:127.0.0.1}:${MYSQL_PORT:3306}/${MYSQL_DATABASE:agentforge}?useUnicode=true&characterEncoding=UTF-8&connectionCollation=utf8mb4_unicode_ci&useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai&rewriteBatchedStatements=true
+    username: ${MYSQL_USER:root}
+    password: ${MYSQL_ROOT_PASSWORD:root123}
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    hikari:
+      pool-name: agentforge-pool
+      maximum-pool-size: 10
+      minimum-idle: 2
+      connection-timeout: 10000
+
+  jpa:
+    # 表结构归 Flyway 管，Hibernate 只做"校验"，绝不建表/改表
+    hibernate:
+      ddl-auto: validate
+    open-in-view: false
+    show-sql: false
+    properties:
+      hibernate:
+        format_sql: true
+        jdbc:
+          time_zone: Asia/Shanghai
+
+  # ------------------------------------------------------------------ Flyway
+  # Spring Boot 检测到 flyway-core + DataSource 后自动配置并执行迁移，
+  # 扫描 classpath:db/migration 下的 V{版本}__{描述}.sql。
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+    # 目标库里已存在对象（没有 flyway_schema_history）时，先建立基线再迁移，
+    # 避免对接"手工建过表"的旧库时直接报错。
+    baseline-on-migrate: true
+    baseline-version: 0
+    baseline-description: baseline
+    # 迁移脚本编码，中文注释/中文默认值必须显式指定
+    encoding: UTF-8
+    # 校验和校验：脚本内容一旦改了，启动时立刻报错，防止"本地改了但库里没改"
+    validate-on-migrate: true
+    # 生产环境不要开 clean（clean 会清库）；本地如要重来，用 make clean 删数据卷
+    clean-disabled: true
+
+server:
+  port: ${SERVER_PORT:8080}
+  shutdown: graceful
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      show-details: always
+
+logging:
+  level:
+    com.agentforge.platform: DEBUG
+    org.flywaydb: INFO

@@ -3,9 +3,11 @@
 
 SHELL := /bin/bash
 COMPOSE := docker compose
+MVN := mvn -B -f platform-api/pom.xml
 
 .DEFAULT_GOAL := help
-.PHONY: help env config up down restart ps logs clean health urls mysql-shell redis-cli
+.PHONY: help env config up down restart ps logs clean health urls mysql-shell redis-cli \
+        api-build api-run api-test db-tables
 
 help: ## 显示所有可用命令
 	@echo "AgentForge 开发命令："
@@ -65,6 +67,18 @@ mysql-shell: ## 进入 MySQL 交互式客户端
 
 redis-cli: ## 进入 Redis 交互式客户端
 	@$(COMPOSE) exec redis sh -c 'if [ -n "$$REDIS_PASSWORD" ]; then exec redis-cli --no-auth-warning -a "$$REDIS_PASSWORD"; else exec redis-cli; fi'
+
+api-build: ## 编译打包 platform-api（跳过测试）
+	@$(MVN) -DskipTests package
+
+api-run: ## 前台启动 platform-api（启动时 Flyway 自动执行迁移建表）
+	@$(MVN) spring-boot:run
+
+api-test: ## 运行 platform-api 测试
+	@$(MVN) test
+
+db-tables: ## 查看 MySQL 中的表与 Flyway 迁移记录
+	@$(COMPOSE) exec mysql sh -c 'exec mysql -uroot -p"$$MYSQL_ROOT_PASSWORD" "$$MYSQL_DATABASE" -e "SHOW TABLES; SELECT installed_rank, version, description, success FROM flyway_schema_history ORDER BY installed_rank;"'
 
 # 允许 `make logs mysql` 这种带参数用法而不报 "No rule to make target"
 %:

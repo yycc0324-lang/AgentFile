@@ -15,6 +15,7 @@
 #      不用 ./data 目录：data/ 是 Agent 的 RAG 原始语料（data/blog、data/repo）。
 #   5. 镜像 tag：mysql / redis 固定到具体版本；minio / qdrant 因官方只维护 latest 与日期型
 #      tag，首次 pull 成功后建议改为具体 tag（见 README「已知注意事项」）。
+#直接用现成镜像，不自己写 Dockerfile 了
 name: agentforge
 
 services:

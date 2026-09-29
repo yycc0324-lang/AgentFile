@@ -1,2 +1,33 @@
 .DS_Store
 **/.DS_Store
+
+# 环境变量（含本地密码，不入库；模板见 .env.example）
+.env
+*.env.local
+
+# Java / Maven
+platform-api/target/
+*.class
+*.jar
+*.war
+
+# Python
+agent-runtime/.venv/
+agent-runtime/__pycache__/
+**/__pycache__/
+*.pyc
+.pytest_cache/
+
+# Node
+web/node_modules/
+web/dist/
+
+# IDE
+.idea/
+.vscode/
+*.iml
+*.ipr
+*.iws
+
+# Agent 的 RAG 原始语料（体积大，本地数据）
+data/
