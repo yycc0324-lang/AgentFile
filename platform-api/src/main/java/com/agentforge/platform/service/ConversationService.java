@@ -28,7 +28,7 @@ public class ConversationService {
     @Transactional
     public ConversationResponse create(ConversationCreateRequest request) {
         if (!projectRepository.existsById(request.getProjectId())) {
-            throw new BusinessException(40400, "项目不存在");
+            throw new BusinessException(404, "项目不存在");
         }
 
         Conversation conversation = new Conversation();

@@ -8,7 +8,9 @@
 #      下面用 spring.config.import 把它按 properties 格式导入，让容器和本地应用共用一份配置。
 #      该导入是 optional 的：文件不存在也不会启动失败。
 #   3. 本机 3306 被 Homebrew 的 mysqld 占用，.env 里把容器 MySQL 映射到了 3307。
-
+agent:
+  runtime:
+    base-url: ${AGENT_RUNTIME_BASE_URL:http://127.0.0.1:8000}
 spring:
   application:
     name: platform-api

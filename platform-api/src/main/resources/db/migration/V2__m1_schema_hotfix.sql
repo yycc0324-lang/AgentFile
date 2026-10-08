@@ -27,3 +27,21 @@ ALTER TABLE task
 
 ALTER TABLE eval_run
     ADD COLUMN model VARCHAR(128) COMMENT '本次评测使用的模型' AFTER name;
+
+
+CREATE TABLE IF NOT EXISTS message (
+                                       id BIGINT AUTO_INCREMENT PRIMARY KEY,
+                                       conversation_id BIGINT NOT NULL,
+                                       `role` VARCHAR(32) NOT NULL,
+                                       content MEDIUMTEXT,
+                                       model VARCHAR(128),
+                                       prompt_tokens INT,
+                                       completion_tokens INT,
+                                       total_tokens INT,
+                                       latency_ms INT,
+                                       status VARCHAR(32) NOT NULL DEFAULT 'success',
+                                       error_message TEXT,
+                                       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                                       INDEX idx_conversation_id (conversation_id),
+                                       INDEX idx_created_at (created_at)
+);
