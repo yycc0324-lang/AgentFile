@@ -35,4 +35,10 @@ public class AgentRunRequest {
 
     @JsonProperty("stream")
     private Boolean stream;
+
+    @JsonProperty("repo_url")
+    private String repoUrl;
+
+    @JsonProperty("blog_path")
+    private String blogPath;
 }

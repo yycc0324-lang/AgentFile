@@ -7,9 +7,11 @@ import com.agentforge.platform.dto.ChatRequest;
 import com.agentforge.platform.dto.ChatResponse;
 import com.agentforge.platform.entity.Conversation;
 import com.agentforge.platform.entity.Message;
+import com.agentforge.platform.entity.Project;
 import com.agentforge.platform.exception.BusinessException;
 import com.agentforge.platform.repository.ConversationRepository;
 import com.agentforge.platform.repository.MessageRepository;
+import com.agentforge.platform.repository.ProjectRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -25,9 +27,10 @@ import java.util.UUID;
 @RequiredArgsConstructor
 public class ChatService {
 
-    private final ConversationRepository conversationRepository;
-    private final MessageRepository messageRepository;
-    private final AgentRuntimeClient agentRuntimeClient;
+    private final ConversationRepository conversationRepository;//会话表
+    private final MessageRepository messageRepository;//消息表
+    private final AgentRuntimeClient agentRuntimeClient;//Agent client服务
+    private final ProjectRepository projectRepository; //项目表
 
     /**
      * 聊天主流程。
@@ -54,7 +57,7 @@ public class ChatService {
         }
 
         // ==============================
-        // 2. 保存用户消息
+        // 2. 保存用户消息，使用JPA TODO 之后该成Mybaits plus +My SQL/Pg SQL
         // ==============================
         Message userMessage = new Message();
         userMessage.setConversationId(conversation.getId());
@@ -65,11 +68,15 @@ public class ChatService {
         userMessage = messageRepository.save(userMessage);
 
         // ==============================
-        // 3. 组装 Python 请求
+        // 3. 组装 Python 请求，提前到Py中构造结构
         // ==============================
+
+
+        Project project = projectRepository.findById(request.getProjectId())
+                .orElseThrow(() -> new BusinessException(40400, "项目不存在"));
+
+
         AgentRunRequest agentRequest = AgentRunRequest.builder()
-                // 当前先用 UUID 模拟任务 ID。
-                // 后面创建 task 表实体后，这里换成真实的 task.id。
                 .taskId("task-" + UUID.randomUUID())
                 .projectId(request.getProjectId())
                 .conversationId(request.getConversationId())
@@ -77,6 +84,8 @@ public class ChatService {
                 .query(request.getMessage())
                 .showCitations(Boolean.TRUE.equals(request.getShowCitations()))
                 .stream(false)
+                .repoUrl(project.getRepoUrl())
+                .blogPath(project.getBlogPath())
                 .build();
 
         // ==============================
@@ -130,6 +139,8 @@ public class ChatService {
                 .content(agentResponse.getContent())
                 .citations(agentResponse.getCitations())
                 .traceId(agentResponse.getTraceId())
+                .agent(agentResponse.getAgent())
+                .steps(agentResponse.getSteps())
                 .promptTokens(promptTokens)
                 .completionTokens(completionTokens)
                 .totalTokens(totalTokens)

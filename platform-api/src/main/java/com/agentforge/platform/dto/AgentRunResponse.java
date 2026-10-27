@@ -27,6 +27,12 @@ public class AgentRunResponse {
     @JsonProperty("trace_id")
     private String traceId;
 
+    @JsonProperty("agent")
+    private String agent;
+
+    @JsonProperty("steps")
+    private List<AgentStep> steps = new ArrayList<>();
+
     @JsonProperty("usage")
     private Map<String, Integer> usage = new HashMap<>();
 }

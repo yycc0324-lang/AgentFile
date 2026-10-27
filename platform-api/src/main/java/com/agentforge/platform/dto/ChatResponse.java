@@ -21,6 +21,10 @@ public class ChatResponse {
     private String content;
     private List<AgentCitation> citations;
     private String traceId;
+
+    private String agent;
+    private List<AgentStep> steps;
+
     private Integer promptTokens;
     private Integer completionTokens;
     private Integer totalTokens;
