@@ -18,5 +18,4 @@ public class ProjectCreateRequest {
 
     private String repoUrl;
 
-    private String blogPath;
 }

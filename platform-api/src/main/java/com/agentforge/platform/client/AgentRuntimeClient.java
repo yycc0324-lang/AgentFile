@@ -8,6 +8,8 @@ import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
 
+import java.time.Duration;
+
 /**
  * Java 调用 Python Agent Runtime 的 HTTP 客户端。
  */
@@ -19,11 +21,17 @@ public class AgentRuntimeClient {
     public AgentRuntimeClient(
             @Value("${agent.runtime.base-url:http://127.0.0.1:8000}")
             String baseUrl) {
+        // 必须显式设置超时：默认是“无限等”，Python 卡死时 Java 会一直挂着，
+        // 既不会成功也不会失败，task 会永远停在 running。
+        SimpleClientHttpRequestFactory factory = new SimpleClientHttpRequestFactory();
+        factory.setConnectTimeout(Duration.ofSeconds(5));    // 连不上 Python：5 秒放弃
+        factory.setReadTimeout(Duration.ofSeconds(180));     // 等 Agent 结果：最多 3 分钟
+
         this.restClient = RestClient.builder()
                 // JDK 默认 HttpClient 会尝试 HTTP/2 升级，并可能使用 chunked 传输；
                 // 这里使用 SimpleClientHttpRequestFactory，走传统 HTTP/1.1 + Content-Length，
                 // 避免 FastAPI/Uvicorn 收到空请求体。
-                .requestFactory(new SimpleClientHttpRequestFactory())
+                .requestFactory(factory)
                 .baseUrl(baseUrl)
                 .build();
     }

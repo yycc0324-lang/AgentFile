@@ -39,9 +39,6 @@ public class Project {
     @Column(name = "repo_url", length = 1000)
     private String repoUrl;
 
-    @Column(name = "blog_path", length = 1000)
-    private String blogPath;
-
     @CreationTimestamp
     @Column(name = "created_at", updatable = false)
     private LocalDateTime createdAt;

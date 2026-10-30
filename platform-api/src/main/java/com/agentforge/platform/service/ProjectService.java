@@ -30,7 +30,6 @@ public class ProjectService {
         project.setName(request.getName());
         project.setDescription(request.getDescription());
         project.setRepoUrl(request.getRepoUrl());
-        project.setBlogPath(request.getBlogPath());
 
         Project saved = projectRepository.save(project);
         return ProjectResponse.from(saved);

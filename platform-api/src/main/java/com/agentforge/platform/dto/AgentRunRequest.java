@@ -39,6 +39,7 @@ public class AgentRunRequest {
     @JsonProperty("repo_url")
     private String repoUrl;
 
-    @JsonProperty("blog_path")
-    private String blogPath;
+    @JsonProperty("trace_id")
+    private String traceId;
+
 }

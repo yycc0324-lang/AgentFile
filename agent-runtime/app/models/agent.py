@@ -1,13 +1,5 @@
 """
-Agent 接口的请求 / 响应模型。
-作用类比：
-    Spring Boot 里的 DTO + @Valid 参数校验。
-
-FastAPI 使用 Pydantic 模型自动完成：
-    1. JSON 转 Python 对象
-    2. 字段类型校验
-    3. 缺失字段校验
-    4. 自动生成 OpenAPI / Swagger 文档
+这里定义了数据接收的规则，哪些T，哪些F都心里有数，靠人靠不住就靠规则约束
 """
 
 from pydantic import BaseModel, Field
@@ -66,13 +58,17 @@ class AgentRunRequest(BaseModel):
         description="是否流式返回",
     )
 
+    repo_url: str | None = Field(
+        default=None,
+        description="代码仓库本地路径或可访问地址",
+    )
+
 
 class Citation(BaseModel):
     """
     引用文献。
 
-    当 Agent 从博客、代码库或爬虫内容中检索到答案时，
-    会通过这个模型返回引用信息。
+    当 Agent 从代码库中检索到答案时，会通过这个模型返回引用信息。
     """
 
     # 引用来源类型：
@@ -102,6 +98,20 @@ class Citation(BaseModel):
     )
 
 
+class AgentStep(BaseModel):
+    """
+    一次 Agent 执行步骤。
+
+    M1 先记录路由、工具调用和结果数量，后续再扩展为完整 Trace。
+    """
+
+    type: str = Field(description="步骤类型：route / tool_call / answer")
+    tool: str | None = Field(default=None, description="工具名")
+    args: dict | None = Field(default=None, description="工具参数")
+    status: str = Field(default="success", description="步骤状态")
+    result_count: int | None = Field(default=None, description="结果数量")
+
+
 class AgentRunResponse(BaseModel):
     """
     Agent 执行响应。
@@ -124,6 +134,16 @@ class AgentRunResponse(BaseModel):
     # trace_id：这次 Agent 执行的调用链 ID。
     trace_id: str = Field(
         description="调用链 Trace ID",
+    )
+
+    agent: str | None = Field(
+        default=None,
+        description="当前固定为 code_agent",
+    )
+
+    steps: list[AgentStep] = Field(
+        default_factory=list,
+        description="Agent 执行步骤",
     )
 
     # token 用量。

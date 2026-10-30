@@ -15,7 +15,6 @@ public class ProjectResponse {
     private String name;
     private String description;
     private String repoUrl;
-    private String blogPath;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
 
@@ -25,7 +24,6 @@ public class ProjectResponse {
         response.setName(project.getName());
         response.setDescription(project.getDescription());
         response.setRepoUrl(project.getRepoUrl());
-        response.setBlogPath(project.getBlogPath());
         response.setCreatedAt(project.getCreatedAt());
         response.setUpdatedAt(project.getUpdatedAt());
         return response;
