@@ -62,6 +62,11 @@ class AgentRunRequest(BaseModel):
         default=None,
         description="代码仓库本地路径或可访问地址",
     )
+    trace_id: str | None = Field(
+        default=None,
+        description="Java 侧生成的 trace_id，原样回显，保证两边落库一致",
+        examples=["trace-1530f0743bf5"],
+    )
 
 
 class Citation(BaseModel):
@@ -110,6 +115,10 @@ class AgentStep(BaseModel):
     args: dict | None = Field(default=None, description="工具参数")
     status: str = Field(default="success", description="步骤状态")
     result_count: int | None = Field(default=None, description="结果数量")
+    duration_ms: int | None = Field(
+        default=None,
+        description="该步骤耗时（毫秒）",
+    )
 
 
 class AgentRunResponse(BaseModel):

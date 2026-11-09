@@ -11,6 +11,8 @@
 agent:
   runtime:
     base-url: ${AGENT_RUNTIME_BASE_URL:http://127.0.0.1:8000}
+    # 一次 /agent/run 内可能有多轮 LLM 调用，模型慢时整条链路要几分钟
+    timeout-seconds: ${AGENT_RUNTIME_TIMEOUT_SECONDS:600}
 spring:
   application:
     name: platform-api

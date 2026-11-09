@@ -20,12 +20,16 @@ public class AgentRuntimeClient {
 
     public AgentRuntimeClient(
             @Value("${agent.runtime.base-url:http://127.0.0.1:8000}")
-            String baseUrl) {
+            String baseUrl,
+            @Value("${agent.runtime.timeout-seconds:600}")
+            int timeoutSeconds) {
         // 必须显式设置超时：默认是“无限等”，Python 卡死时 Java 会一直挂着，
         // 既不会成功也不会失败，task 会永远停在 running。
         SimpleClientHttpRequestFactory factory = new SimpleClientHttpRequestFactory();
         factory.setConnectTimeout(Duration.ofSeconds(5));    // 连不上 Python：5 秒放弃
-        factory.setReadTimeout(Duration.ofSeconds(180));     // 等 Agent 结果：最多 3 分钟
+        // 一次 /agent/run 内部可能有 4~6 次 LLM 调用，模型慢时整条链路能到 6 分钟以上，
+        // 所以默认给 10 分钟，可用 AGENT_RUNTIME_TIMEOUT_SECONDS 覆盖。
+        factory.setReadTimeout(Duration.ofSeconds(timeoutSeconds));
 
         this.restClient = RestClient.builder()
                 // JDK 默认 HttpClient 会尝试 HTTP/2 升级，并可能使用 chunked 传输；
