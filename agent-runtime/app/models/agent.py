@@ -67,6 +67,10 @@ class AgentRunRequest(BaseModel):
         description="Java 侧生成的 trace_id，原样回显，保证两边落库一致",
         examples=["trace-1530f0743bf5"],
     )
+    history: list[dict] = Field(
+        default_factory=list,
+        description="最近若干轮对话 [{role, content}]，不含本次 query",
+    )
 
 
 class Citation(BaseModel):

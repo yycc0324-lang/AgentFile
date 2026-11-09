@@ -5,7 +5,9 @@ import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
-
+import lombok.Builder;
+import java.util.ArrayList;
+import java.util.List;
 /**
  * Java -> Python /agent/run 请求体。
  */
@@ -13,6 +15,7 @@ import lombok.NoArgsConstructor;
 @Builder
 @NoArgsConstructor
 @AllArgsConstructor
+
 public class AgentRunRequest {
 
     @JsonProperty("task_id")
@@ -41,5 +44,9 @@ public class AgentRunRequest {
 
     @JsonProperty("trace_id")
     private String traceId;
+
+    @JsonProperty("history")
+    @Builder.Default //没有它，builder 不传 history 时字段是 null
+    private List<AgentHistoryItem> history = new ArrayList<>();
 
 }

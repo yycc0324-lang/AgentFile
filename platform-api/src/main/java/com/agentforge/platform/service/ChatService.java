@@ -16,8 +16,12 @@ import com.agentforge.platform.repository.ProjectRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
+import com.agentforge.platform.dto.AgentHistoryItem;
 
+import java.util.List;
 import java.util.UUID;
+
+import static io.micrometer.common.util.StringUtils.truncate;
 
 /**
  * 聊天业务逻辑。
@@ -98,8 +102,24 @@ public class ChatService {
                 .toString().replace("-", "").substring(0, 12);
 
         // ==============================
-        // 3. 组装 Python 请求，提前到Py中构造结构
+        // 3. 组装 Python 请求，提前到Py中构造结构+组装历史
         // ==============================
+        List<Message> allMessages = messageRepository
+                .findByConversationIdOrderByCreatedAtAsc(conversation.getId());
+        //从数据库中查询某个会话下的所有消息，并按创建时间升序排列
+        // lambda 里只能捕获有效 final 的变量，先把 id 取出来
+        Long currentMessageId = userMessage.getId();
+
+        List<AgentHistoryItem> history = allMessages.stream()
+                .filter(m -> !m.getId().equals(currentMessageId))
+                .filter(m -> "user".equals(m.getRole()) || "assistant".equals(m.getRole()))
+                .filter(m -> m.getContent() != null && !m.getContent().isBlank())
+                .map(m -> new AgentHistoryItem(m.getRole(), truncate(m.getContent(), 2000)))
+                .toList();
+
+        // 只保留最近 10 条（越靠后越新）
+        int from = Math.max(0, history.size() - 10);
+        history = history.subList(from, history.size());
 
 
         AgentRunRequest agentRequest = AgentRunRequest.builder()
@@ -112,6 +132,7 @@ public class ChatService {
                 .stream(false)
                 .repoUrl(project.getRepoUrl())
                 .traceId(traceId)
+                .history(history)
 
                 .build();
 
@@ -202,5 +223,11 @@ public class ChatService {
             return 0;
         }
         return response.getUsage().getOrDefault(key, 0);
+    }
+    /**
+     * 历史消息只保留前 N 个字符，防止一条长回答把上下文撑爆。
+     */
+    private String truncate(String text, int limit) {
+        return text == null || text.length() <= limit ? text : text.substring(0, limit);
     }
 }

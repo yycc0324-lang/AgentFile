@@ -45,8 +45,16 @@ def run_react(request) -> dict:#request 不是代码里 new 出来的，是 Fast
         raise RuntimeError(
             "LLM 未配置：请检查 .env 里的 LLM_API_KEY / LLM_BASE_URL / LLM_MODEL"
         )
-    messages: list[dict] = [#符合Open AI的Agent对话流格式
+    # 历史对话（不含本次 query），让追问能接上上文
+    history = [
+        {"role": m.get("role"), "content": m.get("content")}
+        for m in (request.history or [])
+        if m.get("role") in ("user", "assistant") and m.get("content")
+    ]
+
+    messages: list[dict] = [  # 符合 OpenAI 的对话流格式
         {"role": "system", "content": build_system_prompt(show_citations)},
+        *history,
         {"role": "user", "content": query},
     ]
 
