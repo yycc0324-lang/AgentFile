@@ -29,4 +29,7 @@ public class AgentStep {
 
     @JsonProperty("result_count")
     private Integer resultCount;
+
+    @JsonProperty("duration_ms")
+    private Integer durationMs;
 }

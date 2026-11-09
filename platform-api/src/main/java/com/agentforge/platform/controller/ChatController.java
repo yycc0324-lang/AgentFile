@@ -75,8 +75,8 @@ public class ChatController {
                         : response.getSteps();
 
                 for (AgentStep step : steps) {
-                    // route 已经通过 route 事件单独推送，这里跳过，避免时间线重复。
-                    if ("route".equals(step.getType())) {
+                    // route / answer 都通过独立事件推送，这里跳过避免时间线重复
+                    if ("route".equals(step.getType()) || "answer".equals(step.getType())) {
                         continue;
                     }
 

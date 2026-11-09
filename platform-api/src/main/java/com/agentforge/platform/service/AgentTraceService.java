@@ -19,9 +19,14 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import com.agentforge.platform.repository.MessageRepository;
+
 
 import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 /**
  * 负责 Task / TaskStep / ToolCall / TraceSpan 落库与查询。
@@ -35,7 +40,7 @@ public class AgentTraceService {
     private final ToolCallRepository toolCallRepository;
     private final TraceSpanRepository traceSpanRepository;
     private final ObjectMapper objectMapper;
-
+    private final MessageRepository messageRepository;
     /**
      * 调用 Python 前创建 task。
      */
@@ -82,12 +87,48 @@ public class AgentTraceService {
         task.setFinishedAt(LocalDateTime.now());
         taskRepository.save(task);
 
+        // 工具步骤耗时之和；剩余时间算模型思考，归到 answer 那一步上
+        int toolMillis = steps.stream()
+                .filter(s -> "tool_call".equals(s.getType()))
+                .mapToInt(s -> s.getDurationMs() == null ? 0 : s.getDurationMs())
+                .sum();
+
+        LocalDateTime rootStartedAt = task.getStartedAt() == null
+                ? LocalDateTime.now()
+                : task.getStartedAt();
+
+        // 根 span：一次 Agent 执行的总体，所有子 span 都挂在它下面
+        TraceSpan root = new TraceSpan();
+        root.setTraceId(response.getTraceId());
+        root.setConversationId(task.getConversationId());
+        root.setMessageId(assistantMessageId);
+        root.setTaskId(task.getId());
+        root.setName("agent.run");
+        root.setSpanType("agent");
+        root.setStatus("success");
+        root.setInput(task.getInput());
+        root.setStartedAt(rootStartedAt);
+        root.setEndedAt(rootStartedAt.plusNanos(latencyMs * 1_000_000L));
+        root.setDurationMs(latencyMs);
+        root = traceSpanRepository.save(root);
+
+        // 子 span 按步骤顺序排成一条时间轴，总和等于 latencyMs
+        LocalDateTime cursor = rootStartedAt;
         int index = 1;
 
         for (AgentStep step : steps) {
             String stepName = step.getTool() == null
                     ? step.getType()
                     : step.getTool();
+
+            int durationMs = step.getDurationMs() == null ? 0 : step.getDurationMs();
+            if ("answer".equals(step.getType())) {
+                // Python 的 answer.duration_ms 是整轮耗时，这里换成"扣掉工具后的剩余时间"
+                durationMs = Math.max(0, latencyMs - toolMillis);
+            }
+            LocalDateTime startedAt = cursor;
+            LocalDateTime endedAt = cursor.plusNanos(durationMs * 1_000_000L);
+            cursor = endedAt;
 
             TaskStep taskStep = new TaskStep();
             taskStep.setTaskId(task.getId());
@@ -97,9 +138,9 @@ public class AgentTraceService {
             taskStep.setStatus(step.getStatus() == null ? "success" : step.getStatus());
             taskStep.setInput(toJson(step.getArgs()));
             taskStep.setOutput(buildOutput(step));
-            taskStep.setStartedAt(LocalDateTime.now());
-            taskStep.setEndedAt(LocalDateTime.now());
-            taskStep.setDurationMs(0);
+            taskStep.setStartedAt(startedAt);
+            taskStep.setEndedAt(endedAt);
+            taskStep.setDurationMs(durationMs);
             taskStep = taskStepRepository.save(taskStep);
 
             Long toolCallId = null;
@@ -113,8 +154,8 @@ public class AgentTraceService {
                 toolCall.setArguments(toJson(step.getArgs()));
                 toolCall.setResult(buildOutput(step));
                 toolCall.setStatus(step.getStatus() == null ? "success" : step.getStatus());
-                toolCall.setDurationMs(0);
-                toolCall.setCalledAt(LocalDateTime.now());
+                toolCall.setDurationMs(durationMs);
+                toolCall.setCalledAt(startedAt);
                 toolCall = toolCallRepository.save(toolCall);
                 toolCallId = toolCall.getId();
             }
@@ -131,9 +172,10 @@ public class AgentTraceService {
             span.setStatus(step.getStatus() == null ? "success" : step.getStatus());
             span.setInput(toJson(step.getArgs()));
             span.setOutput(buildOutput(step));
-            span.setStartedAt(LocalDateTime.now());
-            span.setEndedAt(LocalDateTime.now());
-            span.setDurationMs(0);
+            span.setStartedAt(startedAt);
+            span.setEndedAt(endedAt);
+            span.setDurationMs(durationMs);
+            span.setParentSpanId(root.getId());
             traceSpanRepository.save(span);
 
             index++;
@@ -186,6 +228,33 @@ public class AgentTraceService {
             throw new BusinessException(40400, "Trace 不存在");
         }
 
+        // 先全部转成响应对象，再按 parentSpanId 挂成树
+        Map<Long, TraceSpanResponse> byId = new LinkedHashMap<>();
+        for (TraceSpan span : spans) {
+            byId.put(span.getId(), toTraceSpanResponse(span));
+        }
+
+        List<TraceSpanResponse> roots = new ArrayList<>();
+        for (TraceSpan span : spans) {
+            TraceSpanResponse item = byId.get(span.getId());
+            Long parentId = span.getParentSpanId();
+            if (parentId != null && byId.containsKey(parentId)) {
+                byId.get(parentId).getChildren().add(item);
+            } else {
+                roots.add(item);
+            }
+        }
+        // 顺着 span 上的 message_id 去 message 表拿这一次的 token 总量
+        int tokens = 0;
+        for (TraceSpan span : spans) {
+            if (span.getMessageId() != null) {
+                tokens = messageRepository.findById(span.getMessageId())
+                        .map(m -> m.getTotalTokens() == null ? 0 : m.getTotalTokens())
+                        .orElse(0);
+                break;
+            }
+        }
+
         TraceResponse response = new TraceResponse();
         response.setTraceId(traceId);
         response.setStatus(
@@ -193,16 +262,11 @@ public class AgentTraceService {
                         ? "failed"
                         : "success"
         );
-        response.setDurationMs(
-                spans.stream()
-                        .map(TraceSpan::getDurationMs)
-                        .filter(d -> d != null)
-                        .mapToInt(Integer::intValue)
-                        .sum()
-        );
+        // 总耗时用根节点，不能把根和子节点再加一遍
+        response.setDurationMs(roots.isEmpty() ? 0 : roots.get(0).getDurationMs());
         response.setSpanCount(spans.size());
-        response.setTokens(0);
-        response.setSpans(spans.stream().map(this::toTraceSpanResponse).toList());
+        response.setTokens(tokens);
+        response.setSpans(roots);
         return response;
     }
 

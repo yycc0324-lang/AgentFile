@@ -8,7 +8,7 @@ import org.springframework.validation.FieldError;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
-
+import org.springframework.web.servlet.resource.NoResourceFoundException;
 /**
  * 全局异常处理。
  */
@@ -42,7 +42,13 @@ public class GlobalExceptionHandler {
   public Result<Void> handleConstraintViolationException(ConstraintViolationException e) {
     return Result.error(40000, e.getMessage());
   }
-
+    /**
+     * 路由不存在：前端调了还没实现的接口时走这里。
+     */
+    @ExceptionHandler(NoResourceFoundException.class)
+    public Result<Void> handleNoResourceFound(NoResourceFoundException e) {
+        return Result.error(40400, "接口不存在: /" + e.getResourcePath());
+    }
   /**
    * 兜底异常。
    */
