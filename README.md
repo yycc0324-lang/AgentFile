@@ -136,6 +136,13 @@ make db-tables     # 另一个终端：确认表已建好
 
 ## 已知注意事项
 
+> 迁移与 M1 开发中实际踩过的坑整理成两份：
+>
+> - [docs/项目避坑指南.md](docs/项目避坑指南.md)：环境、启动、契约、引用、Trace 结构
+> - [docs/统计时间避坑指南.md](docs/统计时间避坑指南.md)：耗时口径、Trace 时间轴、Token 统计、超时
+>
+> 遇到问题先看这两份。
+
 1. **3306 端口已被本机 mysqld 占用**（Homebrew 安装的 MySQL 正在监听）。若要同时运行容器版 MySQL，请在 `.env` 中加入 `MYSQL_PORT=3307`，此时容器 MySQL 的地址变为 `127.0.0.1:3307`。
 2. **`.env` 里的值不要直接写 `$`**：compose 对 `.env` 取出的值会再做一次插值，`MYSQL_ROOT_PASSWORD=pa$word` 实际会变成 `pa`（`$word` 被当作未定义变量吃掉）。密码含 `$` 时必须写成 `$$`（`pa$$word` 才是 `pa$word`）。这条同时影响 `make urls`，因为它用 shell 加载同一个 `.env`。
 3. **镜像 tag**：`mysql:8.4`、`redis:7.4-alpine` 已固定版本；`minio/minio:latest`、`qdrant/qdrant:latest`、`minio/mc:latest` 因官方主要以 `latest` / 日期型 tag 发布而暂用 `latest`。首次 `pull` 成功后建议改为具体 tag 以保证可复现（可用 `docker image inspect --format '{{index .RepoTags 0}}'` 确认实际版本）。
