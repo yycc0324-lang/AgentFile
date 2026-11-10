@@ -46,4 +46,8 @@ public class Project {
     @UpdateTimestamp
     @Column(name = "updated_at")
     private LocalDateTime updatedAt;
+
+    //Blog检索
+    @Column(name = "blog_path", length = 1000)
+    private String blogPath;
 }

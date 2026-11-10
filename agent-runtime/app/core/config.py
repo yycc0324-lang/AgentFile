@@ -15,6 +15,8 @@ class Settings(BaseSettings):
         env_file_encoding="utf-8",
         extra="ignore",
     )
+    #内置知识库，0表示没有知识库
+    builtin_project_id: int = 0
 
     # LLM
     llm_api_key: str = ""#同下
@@ -29,9 +31,12 @@ class Settings(BaseSettings):
     embedding_api_key: str = ""
     embedding_base_url: str = ""
     embedding_model: str = ""
+    embedding_dim: int = 1024
+
 
     # Qdrant
     qdrant_url: str = "http://127.0.0.1:6333"
+    qdrant_collection: str = "agentforge_chunks"
 
 
 settings = Settings()

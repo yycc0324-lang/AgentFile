@@ -14,15 +14,33 @@ TEXT_SUFFIXES = { #只搜索后缀
     ".js", ".ts", ".tsx", ".sql", ".properties",
 }
 
+# 语法关键词：它们几乎每个文件都有，当关键词搜只会制造噪音
+STOP_TOKENS = {
+    "class", "def", "function", "interface", "enum", "return",
+    "public", "private", "protected", "import", "from", "package",
+    "the", "and", "for", "this", "that",
+}
+
 
 def _query_tokens(query: str) -> list[str]:
     """优先提取英文/数字标识符；没有时回退到原查询。例如："ProjectService 这个类的代码在哪里？就提取ProjectService"""
     tokens = re.findall(r"[A-Za-z0-9_]{2,}", query)
     #re.findall(r"[A-Za-z0-9_]{2,}", query)：连续 2 个以上英文、数字、下划线，就当成一个 token
 
+    tokens = [token.lower() for token in tokens if token.lower() not in STOP_TOKENS]
+
     if tokens:
-        return [token.lower() for token in tokens]
+        return tokens
     return [query.lower()]
+
+
+def _hits(line: str, token: str) -> bool:
+    """左边界限定：chat 能命中 ChatService、chat(，但不会命中 useChat。"""
+    return re.search(
+        rf"(?<![A-Za-z0-9_]){re.escape(token)}",
+        line,
+        re.IGNORECASE,
+    ) is not None
 
 
 def search_code(query: str, repo_url: str | None, max_results: int = 5) -> list[dict[str, Any]]:
@@ -58,7 +76,7 @@ def search_code(query: str, repo_url: str | None, max_results: int = 5) -> list[
 
         for index, line in enumerate(lines, start=1):
             lower = line.lower()
-            if not any(token in lower for token in tokens):
+            if not any(_hits(lower, token) for token in tokens):
                 continue
 
             score = 1

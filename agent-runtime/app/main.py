@@ -12,6 +12,7 @@ from fastapi import FastAPI
 # 一个 APIRouter 类似 Spring Boot 里的一个 @RestController。
 from app.api.agent import router as agent_router
 from app.api.health import router as health_router
+from app.api.ingest import router as ingest_router
 
 
 # 创建 FastAPI 应用实例。
@@ -39,3 +40,6 @@ app.include_router(health_router)
 # 注册 Agent 执行路由。
 # 注册后，agent_router 里面的接口会自动挂到 app 上。
 app.include_router(agent_router)
+
+# 注册数据接入路由（/ingest/run、/ingest/search）。
+app.include_router(ingest_router)
